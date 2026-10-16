@@ -1,0 +1,14 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# エディタ
+.vscode/
+.idea/
+*.swp
+
+# worktree 置き場(後続スキルが使う想定)
+.worktrees/
+
+# Claude Code ローカル設定
+.claude/settings.local.json
