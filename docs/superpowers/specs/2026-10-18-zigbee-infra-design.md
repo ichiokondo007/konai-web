@@ -20,6 +20,8 @@ Raspberry Pi 5(ホスト名 side3)上に、Philips Hue 電球を MQTT 経由で�
 | 権限 | ユーザー ichio は dialout / sudo グループ所属。パスワードなし sudo 可 |
 | GitHub | 開発機で `ichiokondo007` としてログイン済み。side3 は HTTPS で GitHub に到達可。public リポジトリとする |
 | 電球 | Philips Hue スマート電球 E26 ホワイトグラデーション 1 個。純正ブリッジは使わない |
+| ファームウェア(確認済み 2026-10-18) | EmberZNet 7.4.5 [GA]、EZSP 13。ember の要件を満たし更新不要 |
+| 電球の識別(確認済み 2026-10-18) | モデル 929002335105「Hue white ambiance E26 1600lm with Bluetooth」、IEEE アドレス `0x001788010d9550fb`、シリアル `6541E0`、friendly name `hue-bulb-1` |
 
 ## 3. 決定事項
 
@@ -123,7 +125,7 @@ Hue 電球 ──Zigbee──▶ ZBDongle-E ──USB──▶ zigbee2mqtt コ�
 | 事象 | 判断材料 | 対応 |
 |---|---|---|
 | ember で接続できない(ファームウェアが古い) | ログに `NCP EZSP protocol version of XX does not match Host version` | Zigbee2MQTT 公式が案内する SONOFF Dongle Flasher(Web ベース、Chrome + USB)でファームウェア 7.4.x 以上に更新する。別作業として切り出し、本設計書に結果を追記する |
-| 電球がペアリングできない | permit join 中に 2 分待ってもデバイスが現れない | 電球の電源を 5 回オンオフして工場出荷リセットし再試行 |
+| 電球がペアリングできない | permit join 中に 2 分待ってもデバイスが現れない | **実機で判明(2026-10-18)**: Hue 電球は電源の 5 回オンオフではリセットされず、permit join だけでは参加してこなかった。`zigbee2mqtt/bridge/request/action` に `{"action":"philips_hue_factory_reset","params":{"serial_numbers":["<電球のシリアル>"]}}` を送る(電球本体に印刷された 6 桁)と即座に参加した。Touchlink スキャンは 1 m 離れていると見つからない |
 | コンテナからドングルが見えない | ログに serial port open エラー | `ls -l /dev/serial/by-id/` で by-id パスを確認し、`compose.yaml` の `devices:` を直す |
 | オンボーディングが起動して止まる | ログにオンボーディング URL が出る | `Z2M_ONBOARD_NO_SERVER=1` が渡っているか確認 |
 
