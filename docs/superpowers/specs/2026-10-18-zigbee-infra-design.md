@@ -139,3 +139,28 @@ API の自動テストは Express の段階(次のアクション 2、3)で書�
 - Express API サーバ本体(次のアクション 2、3)
 - 調色、複数電球、認証、Web UI(概要書 項目 5「やらないこと」)
 - ドングルのファームウェア更新(必要になった場合のみ別作業)
+
+## 10. 稼働確認の結果と未対応事項(2026-10-18 時点)
+
+完了条件 6 の 5 項目はすべて満たした(side3 で稼働中。再起動後も自動復帰)。独立レビューで出た指摘のうち、Docker ログのローテーション(`compose.yaml` の `x-logging`)は修正済み。以下は未対応のまま残している。
+
+| 事項 | 対応の目安 |
+|---|---|
+| `ZIGBEE2MQTT_CONFIG_PERMIT_JOIN` は Zigbee2MQTT 2.x では無効の可能性(起動時は常に閉じる仕様) | 変数を消すか、4.3 の表に注記する |
+| ドングル抜き差し時にコンテナが復帰するか未確認(by-id パスの静的確認のみ) | 稼働中に抜き差しして `docker compose ps` を見る。復帰しなければ `docker compose up -d` を打ち直す手順を 7 に書く |
+| イメージタグが浮動(`eclipse-mosquitto:2`、`zigbee2mqtt:2`)。動作確認済みは Zigbee2MQTT 2.14.2 | 固定は任意 |
+| `zigbee2mqtt/data`(ネットワークキー、デバイス DB)のバックアップ方針なし。失うと再ペアリング | `sudo tar` などの手順を 1 行書く |
+| Zigbee チャネルが既定の 11(Wi-Fi ch1 と重なる) | デバイスが少ない今のうちに 15 / 20 / 25 にするか、既定のままと決める |
+| Mosquitto は永続化なし、デバイス状態は retain されない | Express は購読だけで現在状態を得られないので `zigbee2mqtt/hue-bulb-1/get` で要求する。次の要件定義に入れる |
+| `depends_on` は起動順のみで準備完了は待たない | Express 側で MQTT の再接続を実装する前提にする。次の要件定義に入れる |
+| 計画書 Task 5 Step 3 の「電源 5 回オンオフでリセット」は誤り | 計画書を再利用するなら 7 の手順に差し替える |
+| 電球のファームウェア更新(OTA)が利用可能と Zigbee2MQTT が報告 | 今回は未適用。必要になったらフロントエンドの OTA タブから |
+
+### 再開時の確認手順
+
+```bash
+ssh side3 'cd ~/konai-web && git pull && docker compose up -d && docker compose ps'
+ssh side3 'cd ~/konai-web && docker compose exec -T mosquitto mosquitto_pub -h localhost -t zigbee2mqtt/hue-bulb-1/set -m "{\"state\":\"TOGGLE\"}"'
+```
+
+フロントエンド: http://side3:8080 。電球の friendly name は `hue-bulb-1`。
