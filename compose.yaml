@@ -1,7 +1,15 @@
+# Docker 側のログを上限付きでローテーションする(再起動ループ時にディスクを食い潰さないため)
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   mosquitto:
     image: eclipse-mosquitto:2
     restart: unless-stopped
+    logging: *default-logging
     ports:
       - "1883:1883"
     volumes:
@@ -10,6 +18,7 @@ services:
   zigbee2mqtt:
     image: ghcr.io/koenkk/zigbee2mqtt:2
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       - mosquitto
     ports:
