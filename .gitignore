@@ -12,3 +12,6 @@ Thumbs.db
 
 # Claude Code ローカル設定
 .claude/settings.local.json
+
+# Zigbee2MQTT の書き込み領域(ネットワークキー、デバイス一覧、ログ)
+zigbee2mqtt/data/

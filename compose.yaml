@@ -1,0 +1,31 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
+  zigbee2mqtt:
+    image: ghcr.io/koenkk/zigbee2mqtt:2
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./zigbee2mqtt/data:/app/data
+      - /run/udev:/run/udev:ro
+    devices:
+      - /dev/serial/by-id/usb-1a86_USB_Single_Serial_5B33027897-if00:/dev/ttyACM0
+    environment:
+      TZ: Asia/Tokyo
+      Z2M_ONBOARD_NO_SERVER: "1"
+      ZIGBEE2MQTT_CONFIG_SERIAL_PORT: /dev/ttyACM0
+      ZIGBEE2MQTT_CONFIG_SERIAL_ADAPTER: ember
+      ZIGBEE2MQTT_CONFIG_SERIAL_BAUDRATE: "115200"
+      ZIGBEE2MQTT_CONFIG_SERIAL_RTSCTS: "false"
+      ZIGBEE2MQTT_CONFIG_MQTT_SERVER: mqtt://mosquitto:1883
+      ZIGBEE2MQTT_CONFIG_FRONTEND_ENABLED: "true"
+      ZIGBEE2MQTT_CONFIG_PERMIT_JOIN: "false"
