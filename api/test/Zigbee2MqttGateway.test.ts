@@ -76,4 +76,49 @@ describe("Zigbee2MqttGateway", () => {
     expect((await a).state).toBe("ON");
     expect((await b).state).toBe("ON");
   });
+
+  it("ignores malformed JSON and resolves on the next valid message", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const pending = gateway.setState("living1", "ON");
+    await broker.publish("zigbee2mqtt/living1", "{not json");
+    await broker.publish("zigbee2mqtt/living1", JSON.stringify({ brightness: 10 }));
+    await broker.publish("zigbee2mqtt/living1", JSON.stringify({ state: "ON" }));
+    expect((await pending).state).toBe("ON");
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it("late response after timeout is ignored", async () => {
+    await expect(gateway.setState("living1", "ON")).rejects.toBeInstanceOf(DeviceTimeoutError);
+    await broker.publish("zigbee2mqtt/living1", JSON.stringify({ state: "ON" }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(gateway.pendingWaiterCount()).toBe(0);
+  });
+
+  it("leaves no waiters after resolve or reject", async () => {
+    const p = gateway.setState("living1", "ON");
+    await broker.publish("zigbee2mqtt/living1", JSON.stringify({ state: "ON" }));
+    await p;
+    await expect(gateway.getState("living1")).rejects.toBeInstanceOf(DeviceTimeoutError);
+    expect(gateway.pendingWaiterCount()).toBe(0);
+  });
+
+  it("close rejects pending waiters", async () => {
+    const pending = gateway.setState("living1", "ON");
+    const rejected = expect(pending).rejects.toBeInstanceOf(MqttUnavailableError);
+    await gateway.close();
+    await rejected;
+    await expect(gateway.setState("living1", "ON")).rejects.toBeInstanceOf(MqttUnavailableError);
+  });
+
+  it("reconnects and resubscribes after the broker restarts", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const port = broker.port;
+    await broker.close();
+    await waitFor(() => !gateway.isConnected());
+    broker = await startTestBroker(port);
+    await waitFor(() => gateway.isConnected());
+    const pending = gateway.getState("living1");
+    await broker.publish("zigbee2mqtt/living1", JSON.stringify({ state: "OFF" }));
+    expect((await pending).state).toBe("OFF");
+  });
 });

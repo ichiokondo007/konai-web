@@ -19,6 +19,8 @@ interface Waiter {
 export class Zigbee2MqttGateway implements LightGateway {
   private readonly options: Required<Zigbee2MqttGatewayOptions>;
   private client: MqttClient | null = null;
+  /** `${baseTopic}/+` の購読が完了しているか。応答を受け取れる状態の判定に使う */
+  private subscribed = false;
   private readonly waiters = new Map<string, Set<Waiter>>();
 
   constructor(options: Zigbee2MqttGatewayOptions) {
@@ -26,16 +28,29 @@ export class Zigbee2MqttGateway implements LightGateway {
   }
 
   connect(): void {
-    const client = mqtt.connect(this.options.url, { reconnectPeriod: this.options.reconnectPeriodMs });
+    // resubscribe は無効にし、購読は connect ごとに自前で行う。
+    // 有効のままだと mqtt.js が再接続時に内部で SUBSCRIBE を送り、こちらの subscribe() は
+    // 登録済みとして SUBACK を待たずにコールバックされるため、購読完了前に接続済みと判定してしまう。
+    const client = mqtt.connect(this.options.url, {
+      reconnectPeriod: this.options.reconnectPeriodMs,
+      resubscribe: false,
+    });
     this.client = client;
 
     client.on("connect", () => {
       console.log(`mqtt connected: ${this.options.url}`);
       client.subscribe(`${this.options.baseTopic}/+`, (err) => {
-        if (err) console.warn(`mqtt subscribe failed: ${err.message}`);
+        if (err) {
+          console.warn(`mqtt subscribe failed: ${err.message}`);
+          return;
+        }
+        this.subscribed = true;
       });
     });
-    client.on("close", () => console.warn("mqtt connection closed"));
+    client.on("close", () => {
+      this.subscribed = false;
+      console.warn("mqtt connection closed");
+    });
     client.on("error", (err) => console.warn(`mqtt error: ${err.message}`));
     client.on("message", (topic, payload) => this.onMessage(topic, payload));
   }
@@ -43,11 +58,21 @@ export class Zigbee2MqttGateway implements LightGateway {
   async close(): Promise<void> {
     const client = this.client;
     this.client = null;
+    for (const name of this.waiters.keys()) {
+      this.rejectWaiters(name, new MqttUnavailableError());
+    }
     if (client) await client.endAsync();
   }
 
   isConnected(): boolean {
-    return this.client?.connected === true;
+    return this.client?.connected === true && this.subscribed;
+  }
+
+  /** 保留中の応答待ちの数(テスト・診断用) */
+  pendingWaiterCount(): number {
+    let n = 0;
+    for (const set of this.waiters.values()) n += set.size;
+    return n;
   }
 
   setState(name: string, state: LightPower): Promise<LightState> {
@@ -60,7 +85,7 @@ export class Zigbee2MqttGateway implements LightGateway {
 
   private request(name: string, topic: string, payload: string): Promise<LightState> {
     const client = this.client;
-    if (!client || !client.connected) {
+    if (!client || !this.isConnected()) {
       return Promise.reject(new MqttUnavailableError());
     }
     const pending = this.waitForState(name);
