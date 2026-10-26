@@ -21,7 +21,7 @@ Raspberry Pi 5(ホスト名 side3)上に、Philips Hue 電球を MQTT 経由で�
 | GitHub | 開発機で `ichiokondo007` としてログイン済み。side3 は HTTPS で GitHub に到達可。public リポジトリとする |
 | 電球 | Philips Hue スマート電球 E26 ホワイトグラデーション 1 個。純正ブリッジは使わない |
 | ファームウェア(確認済み 2026-10-18) | EmberZNet 7.4.5 [GA]、EZSP 13。ember の要件を満たし更新不要 |
-| 電球の識別(確認済み 2026-10-18) | モデル 929002335105「Hue white ambiance E26 1600lm with Bluetooth」、IEEE アドレス `0x001788010d9550fb`、シリアル `6541E0`、friendly name `hue-bulb-1` |
+| 電球の識別(確認済み 2026-10-18) | モデル 929002335105「Hue white ambiance E26 1600lm with Bluetooth」、IEEE アドレス `0x001788010d9550fb`、シリアル `6541E0`、friendly name `living1`(2026-10-26 に `hue-bulb-1` から変更。API の電球名と一致させるため。設計書 `2026-10-26-light-api-design.md` 参照) |
 
 ## 3. 決定事項
 
@@ -90,10 +90,10 @@ Hue 電球 ──Zigbee──▶ ZBDongle-E ──USB──▶ zigbee2mqtt コ�
 ```
 
 操作トピック(Zigbee2MQTT の既定):
-- 状態取得: `zigbee2mqtt/hue-bulb-1`(購読)
-- 操作: `zigbee2mqtt/hue-bulb-1/set` に `{"state":"ON"}`、`{"brightness":128}` などを発行
+- 状態取得: `zigbee2mqtt/living1`(購読)
+- 操作: `zigbee2mqtt/living1/set` に `{"state":"ON"}`、`{"brightness":128}` などを発行
 
-電球の friendly name はペアリング後にフロントエンドで `hue-bulb-1` に変更する(Express から使う名前を固定するため)。
+電球の friendly name はペアリング後に `living1` に設定する(Express から使う名前を固定するため)。当初は `hue-bulb-1` としていたが、2026-10-26 に API の電球名に合わせて `living1` へ変更した。
 
 ## 5. 作業手順
 
@@ -160,7 +160,7 @@ API の自動テストは Express の段階(次のアクション 2、3)で書�
 
 ```bash
 ssh side3 'cd ~/konai-web && git pull && docker compose up -d && docker compose ps'
-ssh side3 'cd ~/konai-web && docker compose exec -T mosquitto mosquitto_pub -h localhost -t zigbee2mqtt/hue-bulb-1/set -m "{\"state\":\"TOGGLE\"}"'
+ssh side3 'cd ~/konai-web && docker compose exec -T mosquitto mosquitto_pub -h localhost -t zigbee2mqtt/living1/set -m "{\"state\":\"TOGGLE\"}"'
 ```
 
-フロントエンド: http://side3:8080 。電球の friendly name は `hue-bulb-1`。
+フロントエンド: http://side3:8080 。電球の friendly name は `living1`(2026-10-26 に `hue-bulb-1` から変更)。
