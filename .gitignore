@@ -15,3 +15,7 @@ Thumbs.db
 
 # Zigbee2MQTT の書き込み領域(ネットワークキー、デバイス一覧、ログ)
 zigbee2mqtt/data/
+
+# api (Express)
+api/node_modules/
+api/dist/
