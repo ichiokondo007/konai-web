@@ -1,6 +1,7 @@
 import { createApp } from "./app.js";
 import { loadConfig, type Config } from "./config.js";
 import { LightService } from "./service/LightService.js";
+import { gracefulShutdown } from "./shutdown.js";
 import { Zigbee2MqttGateway } from "./zigbee/Zigbee2MqttGateway.js";
 
 const SHUTDOWN_TIMEOUT_MS = 10_000;
@@ -29,20 +30,17 @@ const server = app.listen(config.port, () => {
 });
 
 let shuttingDown = false;
-async function shutdown(signal: string): Promise<void> {
+function onSignal(signal: string): void {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`${signal} received, shutting down`);
-  const forceExit = setTimeout(() => {
-    console.error("shutdown timed out");
-    process.exit(1);
-  }, SHUTDOWN_TIMEOUT_MS);
-
-  await new Promise<void>((resolve) => server.close(() => resolve()));
-  await gateway.close();
-  clearTimeout(forceExit);
-  process.exit(0);
+  void gracefulShutdown(server, gateway, {
+    timeoutMs: SHUTDOWN_TIMEOUT_MS,
+    exit: (code) => process.exit(code),
+    log: (m) => console.log(m),
+    error: (m) => console.error(m),
+  });
 }
 
-process.on("SIGTERM", () => void shutdown("SIGTERM"));
-process.on("SIGINT", () => void shutdown("SIGINT"));
+process.on("SIGTERM", () => onSignal("SIGTERM"));
+process.on("SIGINT", () => onSignal("SIGINT"));
