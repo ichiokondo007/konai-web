@@ -206,7 +206,7 @@ SIGTERM / SIGINT で HTTP サーバーを閉じ、MQTT を `end()` してから�
 | 変数 | 既定 | 意味 |
 |---|---|---|
 | `PORT` | `3000` | HTTP ポート |
-| `MQTT_URL` | (必須) | 例 `mqtt://mosquitto:1883`(compose 内)、`mqtt://side3:1883`(開発機から) |
+| `MQTT_URL` | (必須) | 例 `mqtt://mosquitto:1883`(compose 内)、`mqtt://10.20.10.5:1883`(開発機から。`side3` は ssh の alias で DNS では解決できないため IP を使う) |
 | `MQTT_BASE_TOPIC` | `zigbee2mqtt` | Zigbee2MQTT のベーストピック |
 | `LIGHTS` | (必須) | カンマ区切りの電球名。`living1`、将来 `living1,living2`。空要素は不正 |
 | `DEVICE_TIMEOUT_MS` | `5000` | 応答待ちの上限 |
@@ -244,14 +244,22 @@ SIGTERM / SIGINT で HTTP サーバーを閉じ、MQTT を `end()` してから�
 
 ### 7.5 開発の流れ
 
-1. 開発機で `cd api && MQTT_URL=mqtt://side3:1883 LIGHTS=living1 npm run dev`。side3 の Mosquitto は LAN に 1883 を公開済みなので、デプロイ前に開発機から実機の電球を操作できる
+1. 開発機で `cd api && MQTT_URL=mqtt://10.20.10.5:1883 LIGHTS=living1 npm run dev`。side3 の Mosquitto は LAN に 1883 を公開済みなので、デプロイ前に開発機から実機の電球を操作できる(`side3` というホスト名は ssh の alias なので、Node からは IP で指定する)
 2. `npm test` で自動テスト
 3. main にマージ後、`ssh side3 'cd ~/konai-web && git pull && docker compose up -d --build'`
 
-### 7.6 事前作業(side3 の Zigbee2MQTT フロントエンド)
+### 7.6 事前作業(side3 の Zigbee2MQTT)
 
-- 電球の friendly name を `hue-bulb-1` から `living1` に変更する
-- `2026-10-18-zigbee-infra-design.md` の「再開時の確認手順」に書かれたトピック名を `living1` に更新する
+- 電球の friendly name を `hue-bulb-1` から `living1` に変更する。フロントエンドからでもよいが、実施時は Zigbee2MQTT の bridge API を MQTT 経由で使った(再現可能なため):
+
+  ```bash
+  ssh side3 'cd ~/konai-web && docker compose exec -T mosquitto mosquitto_pub -h localhost \
+    -t zigbee2mqtt/bridge/request/device/rename \
+    -m "{\"from\":\"hue-bulb-1\",\"to\":\"living1\"}"'
+  # 応答は zigbee2mqtt/bridge/response/device/rename に {"status":"ok",...} で届く
+  ```
+
+- `2026-10-18-zigbee-infra-design.md` の「再開時の確認手順」などに書かれたトピック名を `living1` に更新する
 
 ## 8. テスト方針
 
@@ -277,6 +285,8 @@ TDD で進める。1 と 2 は自動、3 は手動。
 
 ### 8.3 実機確認(手動、side3)
 
+開発機で `side3` が DNS 解決できない場合は `10.20.10.5` に置き換える。
+
 ```bash
 curl -s http://side3:3000/health
 curl -s http://side3:3000/lights
@@ -298,3 +308,42 @@ curl -s http://side3:3000/lights/living9        # 404 を確認
 
 - `living2` の追加: compose の `LIGHTS` に追記し、Zigbee2MQTT でペアリングと friendly name 設定をする。コード変更なし
 - 明るさ変更: `PUT /lights/:name/state` の body に `brightness`(0〜254)を追加。`LightGateway.setState` の引数を `{ state?, brightness? }` に広げる。入力検証ライブラリの導入を検討する
+
+## 11. 稼働確認の結果(2026-10-26)
+
+完了条件 9 章の 5 項目はすべて満たした。side3 で `api` コンテナが稼働中。
+
+| 完了条件 | 結果 |
+|---|---|
+| 1. `npm test` 全件成功 | 43 件 PASS(5 ファイル)、`tsc --noEmit` エラーなし |
+| 2. side3 で `api` が running | `docker compose up -d --build` 後に running。ログに `listening on 3000`、`mqtt connected: mqtt://mosquitto:1883` |
+| 3. curl で電球が点いて消え、GET が一致 | `PUT ON` 200(94ms)→ 電球点灯、`PUT OFF` 200(33ms)→ 消灯、`GET` が `OFF`。応答に `brightness: 254` を含む |
+| 4. 存在しない電球名で 404 | `GET /lights/living9` → 404 `LIGHT_NOT_FOUND`。未知のパス(`DELETE /lights/living1`)も JSON の 404 `NOT_FOUND`、`{"state":"on"}` は 400 `INVALID_REQUEST` |
+| 5. `docker compose stop api` が数秒以内 | 254ms。ログに `shutdown complete` |
+
+### 実装中に判明した事項
+
+- **再接続直後の応答取りこぼし**: mqtt.js は既定で再接続時に内部で再購読(`resubscribe`)するため、こちらが `connect` イベントで呼ぶ `subscribe()` は SUBACK を待たずにコールバックされる。その数 ms の間に届いた応答は捨てられ 504 になる(テスト用ブローカーで再現)。対策として `resubscribe: false` にして購読を自前で行い、`isConnected()` は購読完了(SUBACK 受信)後に true とした。6.1 の「`connect` イベントごとに購読」はこの前提で成立している
+- **終了処理の順序**: `server.close()` の完了を待ってから `gateway.close()` を呼ぶと、電球応答を待つリクエストがタイムアウト(5 秒)まで終了を遅らせる。先にゲートウェイを閉じて待ち受けを即時却下し(進行中のリクエストは 503 で返る)、その後サーバーの close 完了を待つ順序にした(`api/src/shutdown.ts`)。実機で「応答待ち中に SIGTERM → 即時 503 → 正常終了」を確認
+- **ホスト名**: `side3` は開発機の ssh alias(10.20.10.5)で DNS では解決できない。Node から接続する際は IP を使う(7.1、7.5 に反映)
+- **friendly name の変更**は Zigbee2MQTT の bridge API(`zigbee2mqtt/bridge/request/device/rename`)で実施した(7.6 に手順を記載)
+
+### 未対応事項(レビューで指摘、今回は見送り)
+
+| 事項 | 影響 | 対応の目安 |
+|---|---|---|
+| 待ち受け中にブローカー接続が切れても waiter を却下せず、5 秒後に 504 `DEVICE_TIMEOUT` になる | 原因がブローカー側なのに電球の不調に見える | `close` イベントで全 waiter を `MqttUnavailableError` で却下すれば即時 503 |
+| 待ち受けのない電球のメッセージにも「malformed」の warn を出す | 将来センサー類を追加するとログが増える | waiter がある名前のときだけ warn |
+| body パーサーの JSON 構文エラー以外(サイズ超過、charset 不正)が 500 になる | クライアント起因なのに error ログが出る | body-parser の `status` が 4xx なら 400 に寄せる |
+| `LIGHTS` の名前に `/` `+` `#` や重複を許す | 設定ミスが常に 504 として現れる | 起動時に検証して失敗させる |
+| publish 失敗時に同名の全 waiter を却下する | 並行リクエストの一方だけ失敗しても両方 503 | 当該 waiter のみ却下 |
+| `server.on("error")` がなく、`EADDRINUSE` 時にスタックトレースで終了 | ログが読みにくい | 1 行メッセージ + exit 1 |
+| `MQTT_BASE_TOPIC` を変えたケースのテストがない | 既定値以外での動作が未検証 | `baseTopic: "z2m"` で 1 ケース追加 |
+
+### 再開時の確認手順
+
+```bash
+ssh side3 'cd ~/konai-web && git pull && docker compose up -d --build && docker compose ps'
+curl -s http://10.20.10.5:3000/health
+curl -s -X PUT http://10.20.10.5:3000/lights/living1/state -H 'content-type: application/json' -d '{"state":"ON"}'
+```
