@@ -1,0 +1,79 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { Zigbee2MqttGateway } from "../src/zigbee/Zigbee2MqttGateway.js";
+import { DeviceTimeoutError, MqttUnavailableError } from "../src/errors.js";
+import { startTestBroker, type TestBroker } from "./helpers/testBroker.js";
+
+async function waitFor(cond: () => boolean, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!cond()) {
+    if (Date.now() > deadline) throw new Error("waitFor: condition not met in time");
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
+describe("Zigbee2MqttGateway", () => {
+  let broker: TestBroker;
+  let gateway: Zigbee2MqttGateway;
+
+  beforeEach(async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    broker = await startTestBroker();
+    gateway = new Zigbee2MqttGateway({ url: broker.url, baseTopic: "zigbee2mqtt", timeoutMs: 200, reconnectPeriodMs: 50 });
+    gateway.connect();
+    await waitFor(() => gateway.isConnected());
+  });
+
+  afterEach(async () => {
+    await gateway.close();
+    await broker.close();
+  });
+
+  it("setState publishes to <name>/set and resolves with the reported state", async () => {
+    const published = broker.nextPublish("zigbee2mqtt/living1/set");
+    const pending = gateway.setState("living1", "ON");
+    expect(JSON.parse(await published)).toEqual({ state: "ON" });
+    await broker.publish("zigbee2mqtt/living1", JSON.stringify({ state: "ON", brightness: 200, linkquality: 100 }));
+    const s = await pending;
+    expect(s.state).toBe("ON");
+    expect(s.brightness).toBe(200);
+    expect(s.receivedAt).toBeInstanceOf(Date);
+  });
+
+  it('getState publishes {"state":""} to <name>/get', async () => {
+    const published = broker.nextPublish("zigbee2mqtt/living1/get");
+    const pending = gateway.getState("living1");
+    expect(JSON.parse(await published)).toEqual({ state: "" });
+    await broker.publish("zigbee2mqtt/living1", JSON.stringify({ state: "OFF" }));
+    const s = await pending;
+    expect(s).toMatchObject({ state: "OFF" });
+    expect(s).not.toHaveProperty("brightness");
+  });
+
+  it("rejects with DeviceTimeoutError when no response", async () => {
+    await expect(gateway.setState("living1", "ON")).rejects.toThrow(new DeviceTimeoutError("living1", 200).message);
+  });
+
+  it("ignores messages for other lights", async () => {
+    const pending = gateway.setState("living1", "ON");
+    await broker.publish("zigbee2mqtt/living2", JSON.stringify({ state: "ON" }));
+    await expect(pending).rejects.toBeInstanceOf(DeviceTimeoutError);
+  });
+
+  it("rejects immediately with MqttUnavailableError when not connected", async () => {
+    const offline = new Zigbee2MqttGateway({ url: "mqtt://127.0.0.1:1", baseTopic: "zigbee2mqtt", timeoutMs: 200, reconnectPeriodMs: 50 });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    offline.connect();
+    const started = Date.now();
+    await expect(offline.setState("living1", "ON")).rejects.toBeInstanceOf(MqttUnavailableError);
+    expect(Date.now() - started).toBeLessThan(100);
+    await offline.close();
+  });
+
+  it("resolves concurrent waiters for the same light with one message", async () => {
+    const a = gateway.setState("living1", "ON");
+    const b = gateway.getState("living1");
+    await broker.publish("zigbee2mqtt/living1", JSON.stringify({ state: "ON" }));
+    expect((await a).state).toBe("ON");
+    expect((await b).state).toBe("ON");
+  });
+});
