@@ -50,3 +50,13 @@ services:
     environment:
       MQTT_URL: mqtt://mosquitto:1883
       LIGHTS: living1,desk
+
+  # フロントエンド(konai-web-front)。静的配信 + /api/ を api へ転送。家庭内の端末から http://<Pi の IP>/ で開く
+  web:
+    build: ../konai-web-front
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      - api
+    ports:
+      - "80:80"
