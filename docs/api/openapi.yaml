@@ -1,0 +1,329 @@
+openapi: 3.1.0
+info:
+  title: konai-web Light API
+  version: 1.1.0
+  summary: Raspberry Pi 上の Zigbee2MQTT 経由で Philips Hue 電球を操作する HTTP API
+  description: |
+    電球のオン / オフ、明るさの変更、現在状態の取得を行う。認証なし。ローカルネットワーク内でのみ提供する。
+
+    - この文書が API の契約。実装とのズレは `api/test/openapi.test.ts` の契約テストで検出する
+    - 使い方(実機での挙動、クライアント実装の注意、curl 例)は同じディレクトリの `README.md` を参照
+    - バージョン履歴: 1.0.0 = オン / オフと状態取得(2026-10-26)、1.1.0 = `brightness` 追加(2026-10-31)
+
+servers:
+  - url: http://10.20.10.5:3000
+    description: 自宅 LAN の Raspberry Pi 5(ホスト名 side3)
+  - url: http://localhost:3000
+    description: 開発時(`npm run dev`)
+
+tags:
+  - name: lights
+    description: 電球の操作と状態取得
+  - name: health
+    description: API 自身の生存確認
+
+paths:
+  /lights:
+    get:
+      tags: [lights]
+      summary: 登録済みの電球名一覧
+      description: 環境変数 `LIGHTS` で API に登録された電球名を返す。電球への通信は行わない。
+      operationId: listLights
+      responses:
+        "200":
+          description: 電球名の一覧
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LightList"
+              example:
+                lights: [living1, desk]
+
+  /lights/{name}:
+    parameters:
+      - $ref: "#/components/parameters/LightName"
+    get:
+      tags: [lights]
+      summary: 電球の現在状態
+      description: 電球に `get` を発行し、電球から返ってきた最新の状態を返す。
+      operationId: getLight
+      responses:
+        "200":
+          description: 現在の状態
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LightState"
+              example:
+                name: living1
+                state: "ON"
+                brightness: 254
+                updatedAt: "2026-10-31T12:00:00.000Z"
+        "404":
+          $ref: "#/components/responses/LightNotFound"
+        "503":
+          $ref: "#/components/responses/MqttUnavailable"
+        "504":
+          $ref: "#/components/responses/DeviceTimeout"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /lights/{name}/state:
+    parameters:
+      - $ref: "#/components/parameters/LightName"
+    put:
+      tags: [lights]
+      summary: 電球のオン / オフと明るさを変更
+      description: |
+        `state` と `brightness` のうち指定されたものだけを電球に送り、反映後の状態を返す。
+
+        電球(Zigbee2MQTT)側の挙動として次を確認済み。詳細は `README.md`。
+        - `brightness` だけを送ると消灯中でも点灯する
+        - `brightness: 0` は消灯扱い(応答の `state` は `OFF`)
+        - `state: OFF` と `brightness` を同時に送ると `brightness` は無視され消灯する
+        - `state: ON` だけを送ると電球が記憶している明るさで点灯する
+      operationId: setLightState
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LightCommand"
+            examples:
+              turnOn:
+                summary: 点灯(記憶している明るさ)
+                value: { state: "ON" }
+              turnOff:
+                summary: 消灯
+                value: { state: "OFF" }
+              dim:
+                summary: 明るさだけ変更(消灯中なら点灯する)
+                value: { brightness: 100 }
+              onWithBrightness:
+                summary: 点灯と明るさを同時に指定
+                value: { state: "ON", brightness: 100 }
+      responses:
+        "200":
+          description: 変更後の状態
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LightState"
+              example:
+                name: living1
+                state: "ON"
+                brightness: 100
+                updatedAt: "2026-10-31T12:00:00.000Z"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "404":
+          $ref: "#/components/responses/LightNotFound"
+        "503":
+          $ref: "#/components/responses/MqttUnavailable"
+        "504":
+          $ref: "#/components/responses/DeviceTimeout"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /health:
+    get:
+      tags: [health]
+      summary: API の生存確認
+      description: |
+        API プロセスが応答できるか、MQTT ブローカーに接続しているかを返す。
+        電球への通信は行わない。監視やデプロイ後の確認に使う。
+      operationId: getHealth
+      responses:
+        "200":
+          description: 正常(MQTT 接続あり)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+              example:
+                status: ok
+                mqtt: connected
+        "503":
+          description: 縮退(MQTT ブローカーに未接続。電球操作は 503 になる)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+              example:
+                status: degraded
+                mqtt: disconnected
+
+components:
+  parameters:
+    LightName:
+      name: name
+      in: path
+      required: true
+      description: 電球名。`GET /lights` が返す名前のいずれか(例 `living1`、`desk`)
+      schema:
+        type: string
+        minLength: 1
+        examples: [living1, desk]
+
+  schemas:
+    LightPower:
+      type: string
+      description: 電球の電源状態
+      enum: ["ON", "OFF"]
+
+    Brightness:
+      type: integer
+      description: |
+        明るさ。Zigbee2MQTT の生値をそのまま使う(0〜254)。255 は Zigbee の予約値のため受け付けない。
+        0 は消灯扱い。パーセント表示したいクライアントは `round(value / 254 * 100)` のように自前で変換する。
+      minimum: 0
+      maximum: 254
+
+    LightList:
+      type: object
+      required: [lights]
+      additionalProperties: false
+      properties:
+        lights:
+          type: array
+          description: 登録済みの電球名。`LIGHTS` 環境変数の順
+          items:
+            type: string
+
+    LightState:
+      type: object
+      description: 電球の状態。Zigbee2MQTT の応答を API が受け取った時点の値
+      required: [name, state, updatedAt]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          description: 電球名
+        state:
+          $ref: "#/components/schemas/LightPower"
+        brightness:
+          allOf:
+            - $ref: "#/components/schemas/Brightness"
+          description: 明るさ。電球の応答に含まれなかった場合は省略される
+        updatedAt:
+          type: string
+          format: date-time
+          description: API が電球の応答を受け取った時刻(ISO 8601、UTC)
+
+    LightCommand:
+      type: object
+      description: |
+        電球への変更指示。`state` と `brightness` はどちらも任意だが、少なくとも一方が必要。
+        ここに定義されていないフィールドは無視される(エラーにはならない)。
+      properties:
+        state:
+          $ref: "#/components/schemas/LightPower"
+        brightness:
+          $ref: "#/components/schemas/Brightness"
+      anyOf:
+        - required: [state]
+        - required: [brightness]
+
+    Health:
+      type: object
+      required: [status, mqtt]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          description: "`ok` = 正常、`degraded` = MQTT 未接続"
+          enum: [ok, degraded]
+        mqtt:
+          type: string
+          description: MQTT ブローカーへの接続状態
+          enum: [connected, disconnected]
+
+    ErrorCode:
+      type: string
+      description: |
+        エラーの種類。クライアントは `message` ではなくこの値で分岐する。
+
+        | code | HTTP | 意味 | クライアントの対処 |
+        |---|---|---|---|
+        | `INVALID_REQUEST` | 400 | body が不正(JSON でない、`state` が ON / OFF 以外、`brightness` が 0〜254 の整数以外、両方とも無い) | リクエストを修正する。再送しても結果は変わらない |
+        | `LIGHT_NOT_FOUND` | 404 | パスの電球名が未登録 | `GET /lights` で名前を確認する |
+        | `NOT_FOUND` | 404 | 存在しないパス | URL を確認する |
+        | `MQTT_UNAVAILABLE` | 503 | API が MQTT ブローカーに未接続 | `GET /health` が `ok` になるまで待って再送する |
+        | `DEVICE_TIMEOUT` | 504 | 電球から時間内に応答が無い(電球の電源断、Zigbee の電波不良) | 数秒おいて再送する。続くなら電球側を確認する |
+        | `INTERNAL_ERROR` | 500 | API 内部の予期しないエラー | API のログを確認する |
+      enum:
+        - INVALID_REQUEST
+        - LIGHT_NOT_FOUND
+        - NOT_FOUND
+        - MQTT_UNAVAILABLE
+        - DEVICE_TIMEOUT
+        - INTERNAL_ERROR
+
+    ErrorResponse:
+      type: object
+      description: すべてのエラー応答に共通の形
+      required: [error]
+      additionalProperties: false
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          additionalProperties: false
+          properties:
+            code:
+              $ref: "#/components/schemas/ErrorCode"
+            message:
+              type: string
+              description: 人が読むための説明(英語)。内容は変わり得るので機械的に解釈しない
+
+  responses:
+    InvalidRequest:
+      description: body が不正
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: INVALID_REQUEST
+              message: brightness must be an integer between 0 and 254
+    LightNotFound:
+      description: 未登録の電球名
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: LIGHT_NOT_FOUND
+              message: "unknown light: living9"
+    MqttUnavailable:
+      description: MQTT ブローカーに未接続
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: MQTT_UNAVAILABLE
+              message: mqtt broker is not connected
+    DeviceTimeout:
+      description: 電球からの応答がタイムアウト
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: DEVICE_TIMEOUT
+              message: no response from living1 within 5000ms
+    InternalError:
+      description: API 内部の予期しないエラー
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: INTERNAL_ERROR
+              message: internal error

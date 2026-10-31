@@ -48,6 +48,8 @@ side3(Raspberry Pi 5)上の HTTP API に curl でリクエストを送ると、P
 
 ベース URL: `http://side3:3000`。JSON のみ。認証なし。
 
+> 2026-10-31 以降、API の正式な契約は `docs/api/openapi.yaml`、使い方は `docs/api/README.md` に置く(14 章)。この章は設計時の記録で、両者が食い違う場合は `openapi.yaml` が正。
+
 ### 4.1 エンドポイント
 
 | メソッド | パス | 役割 |
@@ -422,3 +424,35 @@ main(5fc0a1f)を side3 で `docker compose up -d --build api` し、`http://10.2
 - `philips_hue_factory_reset` は新品の電球でも必要だった(permit join だけでは参加しない点は 10/18 と同じ)
 - ペアリング直後の電球は ON / 254 の状態で、`bridge/devices` の `interview_completed` は数秒で true になった
 - 電球を増やす作業は API 側では compose の 1 行だけで済み、3 層構成と「対応表を持たない」決定(3 章)が効いた
+
+## 14. API リファレンスの整備(2026-10-31)
+
+将来のマイクロサービス化や、LLM / Pico などのクライアント実装に備えて、API の契約を機械可読な形で切り出した。ブランチ `worktree-api-reference`。
+
+### 構成
+
+| ファイル | 役割 |
+|---|---|
+| `docs/api/openapi.yaml` | OpenAPI 3.1 の契約。4 エンドポイント、`LightState` / `LightCommand` / `Health` / `ErrorResponse` のスキーマ、`ErrorCode` の enum(6 種)。`info.version` は 1.1.0(1.0.0 = オン / オフ、1.1.0 = brightness 追加) |
+| `docs/api/README.md` | 使い方ガイド。curl 例、12 章の実機挙動の転記、エラーごとの対処、クライアント実装の注意(名前決め打ち禁止、brightness 省略への備え、連打の間引き、リトライは 503 / 504 のみ) |
+| `api/test/openapi.test.ts` | 契約テスト(32 件)。下記 |
+
+### 契約テストが検出すること
+
+- `openapi.yaml` が有効な OpenAPI 3.1 文書であること(`@seriousme/openapi-schema-validator`)
+- 文書のパス × メソッドが実装のルートと完全に一致すること(増減すると落ちる)
+- `ErrorCode` の enum が `errors.ts` と `app.ts` の全コードと一致すること
+- 各エンドポイントの実レスポンス(200 / 400 / 404 / 503 / 504)が文書のスキーマに適合すること(Ajv 2020-12、`format: date-time` は `ajv-formats`)
+- `LightCommand` スキーマの受理 / 拒否が、ルーターの `parseCommand` の 200 / 400 と 18 通りの body で一致すること
+
+### 決めたこと
+
+- 文書は手書き(スキーマファースト)。コードから生成する方式(tsoa、zod-to-openapi)はエンドポイントが増えてから検討する
+- Swagger UI の配信(`/docs`)は行わない。必要になったら `openapi.yaml` を静的配信するだけで足りる
+- Dockerfile は `src` しかコピーしないので、イメージには文書もテストも入らない。本番の挙動は変わらない
+- 本文は日本語、フィールド名・コード値は英語のまま
+
+### 運用ルール
+
+API を変えるときは先に `openapi.yaml` と `README.md` を更新し、契約テストを赤→緑にしてから実装を変える。互換性を壊す変更はメジャーを上げ、パス接頭辞(`/v2`)の導入を検討する。
+
