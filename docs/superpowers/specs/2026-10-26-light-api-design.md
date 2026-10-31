@@ -391,3 +391,34 @@ main(5fc0a1f)を side3 で `docker compose up -d --build api` し、`http://10.2
 | `[{"state":"ON"}]` | 400 `INVALID_REQUEST` | メッセージは `body must be a JSON object` |
 
 クライアント側の注意: 消灯したまま明るさだけ変えておくことはできない(`brightness` を送ると点く)。`brightness: 0` は消灯になる。明るさを下げたいだけなら 1〜254 を送る。
+
+## 13. 2 個目の電球 `desk` の追加(2026-10-31)
+
+概要書 次のアクション 5 に対応。当初の仮名 `living2` は、利用者の希望で `desk`(机の電球)とした。10 章の見通しどおりコード変更はなし。
+
+### 手順(すべて side3 の Mosquitto 経由で Zigbee2MQTT の bridge API を使用)
+
+1. `zigbee2mqtt/bridge/request/permit_join` に `{"time":254}` を送って参加を許可
+2. `zigbee2mqtt/bridge/request/action` に `{"action":"philips_hue_factory_reset","params":{"serial_numbers":["2B41B0"]}}` を送る(電球本体に印刷されたシリアル)。インフラ設計書 7 章で判明した手順で、数秒で `device_joined` → `device_interview`(successful)が `bridge/event` に流れた
+3. `zigbee2mqtt/bridge/request/device/rename` に `{"from":"0x001788010fe0a05c","to":"desk"}` を送り、`bridge/response/device/rename` で `status: ok` を確認
+4. `permit_join` を `{"time":0}` で閉じる(`bridge/info` の `permit_join: false` を確認)
+5. compose の `LIGHTS` を `living1,desk` にして `docker compose up -d api`(環境変数の変更のみなのでビルド不要)
+
+電球の識別: モデル 929003856401「Hue White 75W A19 E26 smart bulb (1100lm)」、IEEE アドレス `0x001788010fe0a05c`(インフラ設計書 2 章にも記載)。
+
+### 実機確認(side3、2026-10-31)
+
+| 操作 | 結果 |
+|---|---|
+| `GET /lights` | `{"lights":["living1","desk"]}` |
+| `PUT /lights/desk/state` `{"state":"ON"}` / `{"state":"OFF"}` | 200、電球が点灯 / 消灯。応答 50〜60ms |
+| `PUT /lights/desk/state` `{"brightness":50}` | 200、ON / 50(living1 と同じ挙動) |
+| `PUT /lights/desk/state` `{"state":"ON","brightness":254}` | 200、ON / 254 |
+| `GET /lights/living1` | 影響なし(ON / 254 のまま) |
+| `GET /lights/living9` | 404 `LIGHT_NOT_FOUND` |
+
+### 判明した事項
+
+- `philips_hue_factory_reset` は新品の電球でも必要だった(permit join だけでは参加しない点は 10/18 と同じ)
+- ペアリング直後の電球は ON / 254 の状態で、`bridge/devices` の `interview_completed` は数秒で true になった
+- 電球を増やす作業は API 側では compose の 1 行だけで済み、3 層構成と「対応表を持たない」決定(3 章)が効いた
