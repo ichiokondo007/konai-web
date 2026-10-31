@@ -17,8 +17,8 @@ describe("LightService", () => {
   });
 
   it("setState forwards to gateway and shapes response", async () => {
-    const r = await service.setState("living1", "OFF");
-    expect(gw.calls).toEqual([{ method: "setState", name: "living1", state: "OFF" }]);
+    const r = await service.setState("living1", { state: "OFF", brightness: 10 });
+    expect(gw.calls).toEqual([{ method: "setState", name: "living1", command: { state: "OFF", brightness: 10 } }]);
     expect(r).toEqual({ name: "living1", state: "ON", brightness: 254, updatedAt: "2026-10-26T12:00:00.000Z" });
   });
 

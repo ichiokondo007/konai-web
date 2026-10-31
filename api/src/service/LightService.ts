@@ -1,5 +1,5 @@
 import { LightNotFoundError } from "../errors.js";
-import type { LightGateway, LightPower, LightState } from "../zigbee/LightGateway.js";
+import type { LightCommand, LightGateway, LightPower, LightState } from "../zigbee/LightGateway.js";
 
 export interface LightResponse {
   name: string;
@@ -26,9 +26,9 @@ export class LightService {
     return toResponse(name, await this.gateway.getState(name));
   }
 
-  async setState(name: string, state: LightPower): Promise<LightResponse> {
+  async setState(name: string, command: LightCommand): Promise<LightResponse> {
     this.assertKnown(name);
-    return toResponse(name, await this.gateway.setState(name, state));
+    return toResponse(name, await this.gateway.setState(name, command));
   }
 
   private assertKnown(name: string): void {

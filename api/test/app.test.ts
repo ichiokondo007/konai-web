@@ -42,16 +42,56 @@ describe("PUT /lights/:name/state", () => {
   it("sets ON and returns state", async () => {
     const r = await request(app).put("/lights/living1/state").send({ state: "ON" });
     expect(r.status).toBe(200);
-    expect(gw.calls).toEqual([{ method: "setState", name: "living1", state: "ON" }]);
+    expect(gw.calls).toEqual([{ method: "setState", name: "living1", command: { state: "ON" } }]);
     expect(r.body).toEqual({ name: "living1", state: "ON", brightness: 254, updatedAt: "2026-10-26T12:00:00.000Z" });
   });
 
   it("sets OFF", async () => {
     await request(app).put("/lights/living1/state").send({ state: "OFF" });
-    expect(gw.calls[0]).toEqual({ method: "setState", name: "living1", state: "OFF" });
+    expect(gw.calls[0]).toEqual({ method: "setState", name: "living1", command: { state: "OFF" } });
   });
 
-  it.each([{}, { state: "on" }, { state: "TOGGLE" }, { state: 1 }])("400 for body %j", async (body) => {
+  it("state only: forwards exactly { state } without brightness", async () => {
+    await request(app).put("/lights/living1/state").send({ state: "ON" });
+    expect(gw.calls[0].command).toEqual({ state: "ON" });
+    expect(gw.calls[0].command).not.toHaveProperty("brightness");
+  });
+
+  it("brightness only: forwards { brightness }", async () => {
+    const r = await request(app).put("/lights/living1/state").send({ brightness: 100 });
+    expect(r.status).toBe(200);
+    expect(gw.calls).toEqual([{ method: "setState", name: "living1", command: { brightness: 100 } }]);
+  });
+
+  it("state and brightness: forwards both", async () => {
+    const r = await request(app).put("/lights/living1/state").send({ state: "ON", brightness: 0 });
+    expect(r.status).toBe(200);
+    expect(gw.calls).toEqual([{ method: "setState", name: "living1", command: { state: "ON", brightness: 0 } }]);
+  });
+
+  it("accepts the upper bound 254", async () => {
+    const r = await request(app).put("/lights/living1/state").send({ brightness: 254 });
+    expect(r.status).toBe(200);
+  });
+
+  it("ignores unknown body fields", async () => {
+    await request(app).put("/lights/living1/state").send({ state: "ON", color_temp: 300 });
+    expect(gw.calls[0].command).toEqual({ state: "ON" });
+  });
+
+  it.each([
+    {},
+    { state: "on" },
+    { state: "TOGGLE" },
+    { state: 1 },
+    { brightness: 255 },
+    { brightness: -1 },
+    { brightness: 1.5 },
+    { brightness: "100" },
+    { brightness: null },
+    { state: "ON", brightness: 300 },
+    { state: "on", brightness: 100 },
+  ])("400 for body %j", async (body) => {
     const r = await request(app).put("/lights/living1/state").send(body);
     expect(r.status).toBe(400);
     expect(r.body.error.code).toBe("INVALID_REQUEST");

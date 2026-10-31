@@ -53,7 +53,7 @@ side3(Raspberry Pi 5)上の HTTP API に curl でリクエストを送ると、P
 |---|---|---|
 | `GET` | `/lights` | 登録済みの電球名一覧を返す |
 | `GET` | `/lights/:name` | 電球に `get` を発行し、現在状態を返す |
-| `PUT` | `/lights/:name/state` | 電球をオン / オフにし、反映後の状態を返す |
+| `PUT` | `/lights/:name/state` | 電球のオン / オフと明るさを変え、反映後の状態を返す |
 | `GET` | `/health` | API の生存確認。MQTT 接続状態を含む |
 
 ### 4.2 リクエスト / レスポンス
@@ -66,7 +66,9 @@ GET /lights/living1
 200 {"name":"living1","state":"ON","brightness":254,"updatedAt":"2026-10-26T12:00:00.000Z"}
 
 PUT /lights/living1/state
-body {"state":"ON"}          ← "ON" | "OFF" のみ
+body {"state":"ON"}                    ← "ON" | "OFF"
+body {"brightness":100}                ← 0〜254 の整数(2026-10-31 追加)
+body {"state":"ON","brightness":100}   ← 併用可。state と brightness の少なくとも一方が必要
 200 {"name":"living1","state":"ON","brightness":254,"updatedAt":"2026-10-26T12:00:00.000Z"}
 
 GET /health
@@ -75,6 +77,7 @@ GET /health
 ```
 
 - `brightness` は Zigbee2MQTT が返す値(0〜254)をそのまま載せる。応答に含まれない場合は省略する
+- リクエストの `brightness` も変換せずそのまま Zigbee2MQTT の `set` に渡す。`state` だけのリクエストは従来どおりで、電球が記憶している明るさで点灯する。`state` と `brightness` 以外のフィールドは無視する
 - `updatedAt` は API が Zigbee2MQTT の応答を受け取った時刻(ISO 8601)
 
 ### 4.3 エラー応答
@@ -88,7 +91,7 @@ GET /health
 | 状況 | ステータス | code |
 |---|---|---|
 | 一覧にない電球名 | 404 | `LIGHT_NOT_FOUND` |
-| body が不正(`state` が ON / OFF 以外、JSON でない、`state` がない) | 400 | `INVALID_REQUEST` |
+| body が不正(`state` が ON / OFF 以外、`brightness` が 0〜254 の整数以外、JSON でない、`state` と `brightness` の両方がない) | 400 | `INVALID_REQUEST` |
 | MQTT ブローカーに未接続 | 503 | `MQTT_UNAVAILABLE` |
 | 電球からの応答がタイムアウト | 504 | `DEVICE_TIMEOUT` |
 | その他 | 500 | `INTERNAL_ERROR` |
@@ -138,8 +141,14 @@ interface LightState {
   receivedAt: Date;
 }
 
+/** 変更指示。少なくとも一方を指定する(2026-10-31 に brightness を追加) */
+interface LightCommand {
+  state?: LightPower;
+  brightness?: number; // 0〜254
+}
+
 interface LightGateway {
-  setState(name: string, state: LightPower): Promise<LightState>;
+  setState(name: string, command: LightCommand): Promise<LightState>;
   getState(name: string): Promise<LightState>;
   isConnected(): boolean;
 }
@@ -147,9 +156,9 @@ interface LightGateway {
 
 ### 5.4 要求応答の流れ(`PUT /lights/living1/state` の場合)
 
-1. ルーターが body を検証し、`LightService.setState("living1", "ON")` を呼ぶ
+1. ルーターが body を検証し、`LightService.setState("living1", { state: "ON" })` を呼ぶ(`brightness` があればそれも `LightCommand` に載せる)
 2. サービスが名前を一覧と照合し、`gateway.setState` を呼ぶ
-3. ゲートウェイは接続時に `zigbee2mqtt/+` を一度購読している。`setState` では `zigbee2mqtt/living1` 宛ての **次の 1 メッセージ**を待つ Promise を先に作り、その後 `zigbee2mqtt/living1/set` に `{"state":"ON"}` を発行する(待ち受けを先に作るのは応答の取りこぼしを防ぐため)
+3. ゲートウェイは接続時に `zigbee2mqtt/+` を一度購読している。`setState` では `zigbee2mqtt/living1` 宛ての **次の 1 メッセージ**を待つ Promise を先に作り、その後 `zigbee2mqtt/living1/set` に `LightCommand` をそのまま JSON にして(例 `{"state":"ON"}`、`{"brightness":100}`)発行する(待ち受けを先に作るのは応答の取りこぼしを防ぐため)
 4. Zigbee2MQTT が電球に反映し、`zigbee2mqtt/living1` に `{"state":"ON","brightness":254,...}` を流す
 5. ゲートウェイが受信して Promise を解決。JSON のうち `state` と `brightness` だけを取り出して返す
 6. サービスが `name` と `updatedAt` を付けてルーターに返し、200 で応答する
@@ -269,13 +278,14 @@ TDD で進める。1 と 2 は自動、3 は手動。
 
 - `config.ts`: 必須変数の欠落で失敗する、`LIGHTS` のカンマ区切りが配列になる、既定値が入る
 - `LightService`: 一覧にない名前で `LightNotFoundError`、一覧にある名前でゲートウェイが正しい引数で呼ばれる、`name` と `updatedAt` が付く。ゲートウェイは手書きのスタブ
-- `http/`(supertest): スタブのゲートウェイを差した `app` に対して、各エンドポイントのステータスと JSON の形、body 不正で 400、例外クラスごとの HTTP 変換(404 / 503 / 504 / 500)、500 のときレスポンスにスタックが出ないこと
+- `http/`(supertest): スタブのゲートウェイを差した `app` に対して、各エンドポイントのステータスと JSON の形、body 不正(`state` 不正、`brightness` の範囲外・小数・文字列、両方なし)で 400、`brightness` のみ / `state` との併用がそのままゲートウェイに渡ること、例外クラスごとの HTTP 変換(404 / 503 / 504 / 500)、500 のときレスポンスにスタックが出ないこと
 
 ### 8.2 ゲートウェイの統合テスト(Vitest + aedes)
 
 テスト内で aedes をランダムポートで起動し、本物の mqtt.js で `Zigbee2MqttGateway` を接続する。テスト側は Zigbee2MQTT のふりをするクライアントとして同じブローカーに繋ぐ。
 
 - `setState` が `zigbee2mqtt/living1/set` に `{"state":"ON"}` を発行し、テスト側が `zigbee2mqtt/living1` に状態を返すと Promise がその値で解決する
+- `setState` に `{ state, brightness }` や `{ brightness }` を渡すと、その JSON がそのまま `set` に発行される
 - `getState` が `zigbee2mqtt/living1/get` に `{"state":""}` を発行する
 - 応答がなければ `DEVICE_TIMEOUT_MS` 後に `DeviceTimeoutError`(テストでは 200ms 程度に設定)
 - 壊れた JSON や `state` のない応答は無視され、その後の正しい応答で解決する
@@ -291,6 +301,9 @@ TDD で進める。1 と 2 は自動、3 は手動。
 curl -s http://side3:3000/health
 curl -s http://side3:3000/lights
 curl -s -X PUT http://side3:3000/lights/living1/state -H 'content-type: application/json' -d '{"state":"ON"}'
+curl -s -X PUT http://side3:3000/lights/living1/state -H 'content-type: application/json' -d '{"brightness":50}'       # 暗くなる
+curl -s -X PUT http://side3:3000/lights/living1/state -H 'content-type: application/json' -d '{"state":"ON","brightness":254}'
+curl -s -X PUT http://side3:3000/lights/living1/state -H 'content-type: application/json' -d '{"brightness":300}'      # 400 を確認
 curl -s -X PUT http://side3:3000/lights/living1/state -H 'content-type: application/json' -d '{"state":"OFF"}'
 curl -s http://side3:3000/lights/living1
 curl -s http://side3:3000/lights/living9        # 404 を確認
@@ -307,7 +320,7 @@ curl -s http://side3:3000/lights/living9        # 404 を確認
 ## 10. 将来の拡張(設計上の見通しのみ。今回は実装しない)
 
 - `living2` の追加: compose の `LIGHTS` に追記し、Zigbee2MQTT でペアリングと friendly name 設定をする。コード変更なし
-- 明るさ変更: `PUT /lights/:name/state` の body に `brightness`(0〜254)を追加。`LightGateway.setState` の引数を `{ state?, brightness? }` に広げる。入力検証ライブラリの導入を検討する
+- [完了 2026-10-31] 明るさ変更: `PUT /lights/:name/state` の body に `brightness`(0〜254)を追加。`LightGateway.setState` の引数を `LightCommand = { state?, brightness? }` に広げた。入力検証ライブラリは入れず、手書きの検証(`isBrightness`)で足りた。結果は 12 章
 
 ## 11. 稼働確認の結果(2026-10-26)
 

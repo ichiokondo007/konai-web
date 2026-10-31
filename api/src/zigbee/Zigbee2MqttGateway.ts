@@ -1,6 +1,6 @@
 import mqtt, { type MqttClient } from "mqtt";
 import { DeviceTimeoutError, MqttUnavailableError } from "../errors.js";
-import type { LightGateway, LightPower, LightState } from "./LightGateway.js";
+import type { LightCommand, LightGateway, LightState } from "./LightGateway.js";
 
 export interface Zigbee2MqttGatewayOptions {
   url: string;
@@ -75,8 +75,8 @@ export class Zigbee2MqttGateway implements LightGateway {
     return n;
   }
 
-  setState(name: string, state: LightPower): Promise<LightState> {
-    return this.request(name, `${this.options.baseTopic}/${name}/set`, JSON.stringify({ state }));
+  setState(name: string, command: LightCommand): Promise<LightState> {
+    return this.request(name, `${this.options.baseTopic}/${name}/set`, JSON.stringify(command));
   }
 
   getState(name: string): Promise<LightState> {
