@@ -15,7 +15,7 @@ function isBrightness(value: unknown): value is number {
  * 少なくとも一方が必要。それ以外のフィールドは無視する。
  */
 function parseCommand(body: unknown): LightCommand {
-  if (typeof body !== "object" || body === null) {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
     throw new InvalidRequestError("body must be a JSON object");
   }
   const { state, brightness } = body as { state?: unknown; brightness?: unknown };

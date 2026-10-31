@@ -14,6 +14,7 @@ side3(Raspberry Pi 5)上の HTTP API に curl でリクエストを送ると、P
 ### やること
 
 - 電球のオン / オフ(`PUT /lights/:name/state`)
+- 電球の明るさの変更(同じ `PUT /lights/:name/state`。2026-10-31 に追加、12 章)
 - 電球の現在状態の取得(`GET /lights/:name`)
 - 登録済み電球名の一覧(`GET /lights`)
 - 生存確認(`GET /health`)
@@ -22,7 +23,7 @@ side3(Raspberry Pi 5)上の HTTP API に curl でリクエストを送ると、P
 
 ### やらないこと(次のイテレーション以降)
 
-- 明るさの変更(レスポンスには Zigbee2MQTT が返す `brightness` をそのまま載せるが、変更は受け付けない)
+- ~~明るさの変更~~(初回 2026-10-26 は見送り。2026-10-31 に追加し「やること」へ移動)
 - `TOGGLE`
 - ペアリング(permit join)の API 化
 - 調色、認証、Web UI(概要書 項目 5)
@@ -40,7 +41,7 @@ side3(Raspberry Pi 5)上の HTTP API に curl でリクエストを送ると、P
 | 内部構成 | HTTP 層 / サービス層 / ゲートウェイ層の 3 層。ゲートウェイはインターフェースで切る | 難所である MQTT の要求応答を 1 ファイルに閉じ、層ごとに独立してテストする |
 | HTTP フレームワーク | Express 5 | 概要書どおり。5 系は async ハンドラの例外を自動でエラーハンドラに渡す |
 | MQTT クライアント | mqtt.js(`mqtt`) | 標準的。自動再接続あり |
-| 入力検証 | 手書き | 検証対象が `state` 1 項目のみ。明るさ追加時に見直す |
+| 入力検証 | 手書き | 当初は `state` 1 項目のみ。2026-10-31 の明るさ追加時に見直し、`state` と `brightness` の 2 項目なら手書きで十分と判断してライブラリは入れなかった |
 | ログ | `console.log` / `console.error` のみ | 最小構成の方針に合わせる |
 
 ## 4. API 仕様
@@ -360,3 +361,19 @@ ssh side3 'cd ~/konai-web && git pull && docker compose up -d --build && docker 
 curl -s http://10.20.10.5:3000/health
 curl -s -X PUT http://10.20.10.5:3000/lights/living1/state -H 'content-type: application/json' -d '{"state":"ON"}'
 ```
+
+## 12. 明るさ調整の追加(2026-10-31)
+
+概要書 次のアクション 4「明るさ調整を追加する」に対応。ブランチ `feature/light-brightness`。
+
+### 変更点
+
+- `PUT /lights/:name/state` の body に `brightness`(0〜254 の整数)を追加。`state` と `brightness` はどちらも任意で、少なくとも一方が必要。4.2 / 4.3 に反映
+- `LightGateway.setState(name, command: LightCommand)` に変更し、`Zigbee2MqttGateway` は `LightCommand` をそのまま JSON にして `set` に発行する(5.3 / 5.4)。`LightService` は型の差し替えのみ
+- 値は変換しない。`state` だけのリクエストは従来どおり `{"state":"ON"}` が発行され、電球が記憶している明るさで点灯する
+- 検証はルーターの `parseCommand` に手書き(`isBrightness`)。配列 body や `null` は「JSON オブジェクトでない」として 400
+- テストは 43 → 58 件。テストファイルも型チェックの対象にした(`tsconfig.test.json`、`npm run typecheck`)。レビューで旧シグネチャの呼び出しがテストに残っていたのを見つけたため
+
+### 実機確認(side3)
+
+デプロイ後に 8.3 の手順で確認し、結果をここに追記する。

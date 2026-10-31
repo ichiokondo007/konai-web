@@ -33,7 +33,7 @@ describe("LightService", () => {
   });
 
   it("rejects unknown light without calling gateway", async () => {
-    await expect(service.setState("living9", "ON")).rejects.toBeInstanceOf(LightNotFoundError);
+    await expect(service.setState("living9", { state: "ON" })).rejects.toBeInstanceOf(LightNotFoundError);
     await expect(service.getState("living9")).rejects.toThrow("unknown light: living9");
     expect(gw.calls).toEqual([]);
   });

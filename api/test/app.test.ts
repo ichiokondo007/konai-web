@@ -98,6 +98,13 @@ describe("PUT /lights/:name/state", () => {
     expect(gw.calls).toEqual([]);
   });
 
+  it("array body is rejected as not an object", async () => {
+    const r = await request(app).put("/lights/living1/state").send([{ state: "ON" }]);
+    expect(r.status).toBe(400);
+    expect(r.body.error).toEqual({ code: "INVALID_REQUEST", message: "body must be a JSON object" });
+    expect(gw.calls).toEqual([]);
+  });
+
   it("malformed JSON body returns 400", async () => {
     const r = await request(app)
       .put("/lights/living1/state")
