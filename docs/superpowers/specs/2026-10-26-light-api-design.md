@@ -374,6 +374,20 @@ curl -s -X PUT http://10.20.10.5:3000/lights/living1/state -H 'content-type: app
 - 検証はルーターの `parseCommand` に手書き(`isBrightness`)。配列 body や `null` は「JSON オブジェクトでない」として 400
 - テストは 43 → 58 件。テストファイルも型チェックの対象にした(`tsconfig.test.json`、`npm run typecheck`)。レビューで旧シグネチャの呼び出しがテストに残っていたのを見つけたため
 
-### 実機確認(side3)
+### 実機確認(side3、2026-10-31)
 
-デプロイ後に 8.3 の手順で確認し、結果をここに追記する。
+main(5fc0a1f)を side3 で `docker compose up -d --build api` し、`http://10.20.10.5:3000` に対して curl で確認した。すべて 200 / 400 が期待どおりで、応答は 50ms 前後。電球の見た目も応答と一致した。
+
+| 送った body | 応答(state / brightness) | 判明したこと |
+|---|---|---|
+| `{"state":"ON"}` | ON / 254 | 従来どおり。ペイロードも変わらない |
+| `{"brightness":50}` | ON / 50 | `brightness` だけで暗くなる |
+| `{"state":"ON","brightness":254}` | ON / 254 | 併用可 |
+| `{"state":"OFF"}` → `{"brightness":100}` | OFF / 254 → **ON** / 100 | 消灯中に `brightness` だけ送ると電球が点く(Zigbee2MQTT が ON を伴って送る) |
+| `{"state":"OFF","brightness":10}` | OFF / 100 | OFF を伴うと `brightness` は無視され、記憶値も変わらない |
+| `{"state":"ON"}`(上の直後) | ON / 100 | 記憶している明るさで点灯する(4.2 の記述を裏付け) |
+| `{"brightness":0}` | **OFF** / 0 | 0 は消灯扱いになる(Zigbee2MQTT の仕様) |
+| `{"brightness":300}` | 400 `INVALID_REQUEST` | メッセージは `brightness must be an integer between 0 and 254` |
+| `[{"state":"ON"}]` | 400 `INVALID_REQUEST` | メッセージは `body must be a JSON object` |
+
+クライアント側の注意: 消灯したまま明るさだけ変えておくことはできない(`brightness` を送ると点く)。`brightness: 0` は消灯になる。明るさを下げたいだけなら 1〜254 を送る。
