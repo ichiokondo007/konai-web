@@ -51,7 +51,8 @@ services:
       MQTT_URL: mqtt://mosquitto:1883
       LIGHTS: living1,desk
 
-  # フロントエンド(konai-web-front)。静的配信 + /api/ を api へ転送。家庭内の端末から http://<Pi の IP>/ で開く
+  # フロントエンド(konai-web-front)。静的配信 + /api/ を api へ転送。家庭内の端末から http://<Pi の IP>:8088/ で開く
+  # (80 番は Pi 上の k3s の Traefik が横取りするため使わない)
   web:
     build: ../konai-web-front
     restart: unless-stopped
@@ -59,4 +60,4 @@ services:
     depends_on:
       - api
     ports:
-      - "80:80"
+      - "8088:80"
