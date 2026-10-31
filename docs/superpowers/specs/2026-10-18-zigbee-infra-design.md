@@ -22,6 +22,7 @@ Raspberry Pi 5(ホスト名 side3)上に、Philips Hue 電球を MQTT 経由で�
 | 電球 | Philips Hue スマート電球 E26 ホワイトグラデーション 1 個。純正ブリッジは使わない |
 | ファームウェア(確認済み 2026-10-18) | EmberZNet 7.4.5 [GA]、EZSP 13。ember の要件を満たし更新不要 |
 | 電球の識別(確認済み 2026-10-18) | モデル 929002335105「Hue white ambiance E26 1600lm with Bluetooth」、IEEE アドレス `0x001788010d9550fb`、シリアル `6541E0`、friendly name `living1`(2026-10-26 に `hue-bulb-1` から変更。API の電球名と一致させるため。設計書 `2026-10-26-light-api-design.md` 参照) |
+| 2 個目の電球(追加 2026-10-31) | モデル 929003856401「Hue White 75W A19 E26 smart bulb (1100lm)」、IEEE アドレス `0x001788010fe0a05c`、シリアル `2B41B0`、friendly name `desk`。手順は 7 章の方法どおり: permit join を開き `philips_hue_factory_reset` をシリアル指定で送ると即座に参加し、interview 完了後に `bridge/request/device/rename` で命名。API 設計書 13 章に記録 |
 
 ## 3. 決定事項
 

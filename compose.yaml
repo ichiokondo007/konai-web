@@ -49,4 +49,4 @@ services:
       - "3000:3000"
     environment:
       MQTT_URL: mqtt://mosquitto:1883
-      LIGHTS: living1
+      LIGHTS: living1,desk

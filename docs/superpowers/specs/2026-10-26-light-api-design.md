@@ -35,7 +35,7 @@ side3(Raspberry Pi 5)上の HTTP API に curl でリクエストを送ると、P
 |---|---|---|
 | 言語 | TypeScript(`strict: true`、ESM) | 本設計での決定。概要書は Node.js / Express とだけ記載 |
 | パス設計 | `/lights/:name` 形式。`:name` は Zigbee2MQTT の friendly name と同一 | MQTT トピックが `zigbee2mqtt/<friendly name>/...` と名前ベースなので、そのまま写せる。電球を増やしても API の形が変わらない |
-| 電球名 | `living1`。将来 `living2` を追加 | 利用者の決定 |
+| 電球名 | `living1`。2 個目は `desk`(2026-10-31 に追加。当初の仮名は `living2`) | 利用者の決定 |
 | 名前の対応 | API 側に対応表は持たず、環境変数 `LIGHTS` に存在する電球名の一覧だけを持つ。一覧にない名前は 404 | 名前が 2 系統あるとデバッグ時に混乱する。Zigbee2MQTT 側の friendly name を `hue-bulb-1` → `living1` に変更する |
 | 操作の応答 | 同期。`set` 発行後に `zigbee2mqtt/<name>` の応答を待ち、反映後の実際の状態を 200 で返す。応答がなければ 504 | curl を叩いた時点で結果が分かる。電球の電源断に気づける。GET も同じ待ち受け部品で実装できる |
 | 内部構成 | HTTP 層 / サービス層 / ゲートウェイ層の 3 層。ゲートウェイはインターフェースで切る | 難所である MQTT の要求応答を 1 ファイルに閉じ、層ごとに独立してテストする |
@@ -218,7 +218,7 @@ SIGTERM / SIGINT で HTTP サーバーを閉じ、MQTT を `end()` してから�
 | `PORT` | `3000` | HTTP ポート |
 | `MQTT_URL` | (必須) | 例 `mqtt://mosquitto:1883`(compose 内)、`mqtt://10.20.10.5:1883`(開発機から。`side3` は ssh の alias で DNS では解決できないため IP を使う) |
 | `MQTT_BASE_TOPIC` | `zigbee2mqtt` | Zigbee2MQTT のベーストピック |
-| `LIGHTS` | (必須) | カンマ区切りの電球名。`living1`、将来 `living1,living2`。空要素は不正 |
+| `LIGHTS` | (必須) | カンマ区切りの電球名。現在 `living1,desk`(2026-10-31 に `desk` を追加)。空要素は不正 |
 | `DEVICE_TIMEOUT_MS` | `5000` | 応答待ちの上限 |
 
 ### 7.2 ツール選定
@@ -320,7 +320,7 @@ curl -s http://side3:3000/lights/living9        # 404 を確認
 
 ## 10. 将来の拡張(設計上の見通しのみ。今回は実装しない)
 
-- `living2` の追加: compose の `LIGHTS` に追記し、Zigbee2MQTT でペアリングと friendly name 設定をする。コード変更なし
+- [完了 2026-10-31] 2 個目の電球の追加(名前は `desk`): compose の `LIGHTS` に追記し、Zigbee2MQTT でペアリングと friendly name 設定をする。コード変更なし。結果は 13 章
 - [完了 2026-10-31] 明るさ変更: `PUT /lights/:name/state` の body に `brightness`(0〜254)を追加。`LightGateway.setState` の引数を `LightCommand = { state?, brightness? }` に広げた。入力検証ライブラリは入れず、手書きの検証(`isBrightness`)で足りた。結果は 12 章
 
 ## 11. 稼働確認の結果(2026-10-26)
