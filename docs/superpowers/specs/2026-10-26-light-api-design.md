@@ -435,14 +435,14 @@ main(5fc0a1f)を side3 で `docker compose up -d --build api` し、`http://10.2
 |---|---|
 | `docs/api/openapi.yaml` | OpenAPI 3.1 の契約。4 エンドポイント、`LightState` / `LightCommand` / `Health` / `ErrorResponse` のスキーマ、`ErrorCode` の enum(6 種)。`info.version` は 1.1.0(1.0.0 = オン / オフ、1.1.0 = brightness 追加) |
 | `docs/api/README.md` | 使い方ガイド。curl 例、12 章の実機挙動の転記、エラーごとの対処、クライアント実装の注意(名前決め打ち禁止、brightness 省略への備え、連打の間引き、リトライは 503 / 504 のみ) |
-| `api/test/openapi.test.ts` | 契約テスト(32 件)。下記 |
+| `api/test/openapi.test.ts` | 契約テスト(34 件)。下記 |
 
 ### 契約テストが検出すること
 
 - `openapi.yaml` が有効な OpenAPI 3.1 文書であること(`@seriousme/openapi-schema-validator`)
-- 文書のパス × メソッドが実装のルートと完全に一致すること(増減すると落ちる)
-- `ErrorCode` の enum が `errors.ts` と `app.ts` の全コードと一致すること
-- 各エンドポイントの実レスポンス(200 / 400 / 404 / 503 / 504)が文書のスキーマに適合すること(Ajv 2020-12、`format: date-time` は `ajv-formats`)
+- 文書のパス × メソッドが、Express のルーター層(`app.router.stack`)から取り出した実装のルートと完全に一致すること。ルートの追加・削除、文書にないパスへのルーターのマウントで落ちる
+- `ErrorCode` の enum が、`errors.ts` が export する全エラークラスの `code` と、実際に 404(未知のパス)/ 500(予期しない例外)を起こして観測したコードの和集合と一致すること。エラークラスを増やすと落ちる
+- 各エンドポイントの実レスポンス(200 / 400 / 404 / 500 / 503 / 504)が文書のスキーマに適合すること(Ajv 2020-12 の strict モード、`format: date-time` は `ajv-formats`)
 - `LightCommand` スキーマの受理 / 拒否が、ルーターの `parseCommand` の 200 / 400 と 18 通りの body で一致すること
 
 ### 決めたこと

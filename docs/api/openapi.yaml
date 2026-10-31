@@ -38,6 +38,8 @@ paths:
                 $ref: "#/components/schemas/LightList"
               example:
                 lights: [living1, desk]
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /lights/{name}:
     parameters:
@@ -82,6 +84,9 @@ paths:
         - `brightness: 0` は消灯扱い(応答の `state` は `OFF`)
         - `state: OFF` と `brightness` を同時に送ると `brightness` は無視され消灯する
         - `state: ON` だけを送ると電球が記憶している明るさで点灯する
+
+        同じ電球に短い間隔で複数の要求を送ると、電球からの 1 つの応答で複数の要求が同時に解決されるため、
+        応答が自分の指示を反映していないことがある。確実に知りたいときは少し待って `GET /lights/{name}` で再確認する。
       operationId: setLightState
       requestBody:
         required: true
@@ -152,6 +157,8 @@ paths:
               example:
                 status: degraded
                 mqtt: disconnected
+        "500":
+          $ref: "#/components/responses/InternalError"
 
 components:
   parameters:
@@ -202,8 +209,7 @@ components:
         state:
           $ref: "#/components/schemas/LightPower"
         brightness:
-          allOf:
-            - $ref: "#/components/schemas/Brightness"
+          $ref: "#/components/schemas/Brightness"
           description: 明るさ。電球の応答に含まれなかった場合は省略される
         updatedAt:
           type: string
@@ -250,7 +256,7 @@ components:
         | `NOT_FOUND` | 404 | 存在しないパス | URL を確認する |
         | `MQTT_UNAVAILABLE` | 503 | API が MQTT ブローカーに未接続 | `GET /health` が `ok` になるまで待って再送する |
         | `DEVICE_TIMEOUT` | 504 | 電球から時間内に応答が無い(電球の電源断、Zigbee の電波不良) | 数秒おいて再送する。続くなら電球側を確認する |
-        | `INTERNAL_ERROR` | 500 | API 内部の予期しないエラー | API のログを確認する |
+        | `INTERNAL_ERROR` | 500 | API 内部の予期しないエラー。どのエンドポイントでも起き得る | API のログを確認する |
       enum:
         - INVALID_REQUEST
         - LIGHT_NOT_FOUND
