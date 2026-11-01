@@ -19,3 +19,4 @@ zigbee2mqtt/data/
 # api (Express)
 api/node_modules/
 api/dist/
+.env

@@ -1,0 +1,11 @@
+# konai web を https://konai.kd1-tech.net/ で配信する(LAN 内限定、名前解決は Cloudflare の公開 DNS)
+# 証明書は Let's Encrypt の DNS-01。Cloudflare API トークンは .env の CF_API_TOKEN から渡す
+konai.kd1-tech.net {
+	tls {
+		dns cloudflare {env.CF_API_TOKEN}
+		# LAN 内のサーバなので、ACME の DNS 伝播チェックは公開リゾルバで行う
+		resolvers 1.1.1.1 8.8.8.8
+	}
+	encode gzip
+	reverse_proxy web:80
+}

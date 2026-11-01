@@ -61,3 +61,27 @@ services:
       - api
     ports:
       - "8088:80"
+
+  # リバースプロキシ + 自動 HTTPS(Let's Encrypt DNS-01 via Cloudflare)。
+  # https://konai.kd1-tech.net/ を web へ転送。80 番は自動で https にリダイレクト
+  # k3s は 2026-11-01 に停止済みなので 80/443 を使える
+  caddy:
+    image: ghcr.io/caddybuilds/caddy-cloudflare:latest
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      - web
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      CF_API_TOKEN: ${CF_API_TOKEN}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
