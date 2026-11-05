@@ -20,3 +20,6 @@ zigbee2mqtt/data/
 api/node_modules/
 api/dist/
 .env
+
+# compose.yaml などの手動バックアップ
+*.bak-*
