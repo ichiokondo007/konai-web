@@ -456,3 +456,35 @@ main(5fc0a1f)を side3 で `docker compose up -d --build api` し、`http://10.2
 
 API を変えるときは先に `openapi.yaml` と `README.md` を更新し、契約テストを赤→緑にしてから実装を変える。互換性を壊す変更はメジャーを上げ、パス接頭辞(`/v2`)の導入を検討する。
 
+
+## 15. 階段の電球 `stairs` の追加(2026-11-08)
+
+シリアル `2CCE39` の Hue 電球を階段用として追加した。名前は場所ベースで `stairs`(`desk` と同じ方針。階段に 2 個目を足すときは `stairs2`)。13 章の手順を踏襲し、コード変更はなし。
+
+なお、`living2`、`living3` は 2026-11 上旬に compose の `LIGHTS` だけで追加されており、設計書・概要書に手順の記録はない(本章の対象外)。
+
+### 手順(すべて side3 の Mosquitto 経由で Zigbee2MQTT の bridge API を使用)
+
+1. `zigbee2mqtt/bridge/request/permit_join` に `{"time":254}` → `status: ok`
+2. `zigbee2mqtt/bridge/request/action` に `{"action":"philips_hue_factory_reset","params":{"serial_numbers":["2CCE39"]}}` を送る。**1 回目は 2 分待っても参加せず**(Zigbee2MQTT のログでは Touchlink の全チャネルスキャンが走って終了)。同じ要求を**再送**したところ `status: ok` の直後に `device_joined` → `device_interview`(started → successful)が `bridge/event` に流れた
+3. `zigbee2mqtt/bridge/request/device/rename` に `{"from":"0x00178801101f0e86","to":"stairs"}` → `status: ok`
+4. `permit_join` を `{"time":0}` で閉じ、`bridge/info` の `permit_join: false` を確認
+5. compose の `LIGHTS` を `living1,desk,living2,living3,stairs` にしてコミット・push。side3 で `git pull && docker compose up -d api`(環境変数のみの変更でビルド不要)
+
+電球の識別: モデル 929003856401「Hue White 75W A19 E26 smart bulb (1100lm)」(`desk` と同型)、IEEE アドレス `0x00178801101f0e86`、シリアル `2CCE39`。
+
+### 実機確認(side3、2026-11-08)
+
+| 操作 | 結果 |
+|---|---|
+| `GET /lights` | `{"lights":["living1","desk","living2","living3","stairs"]}` |
+| `GET /lights/stairs` | 200、ON / 254(ペアリング直後の状態) |
+| `PUT /lights/stairs/state` `{"state":"OFF"}` / `{"state":"ON"}` | 200、電球が消灯 / 点灯。応答 60〜180ms |
+| `PUT /lights/stairs/state` `{"brightness":50}` | 200、ON / 50 |
+| `PUT /lights/stairs/state` `{"state":"ON","brightness":254}` | 200、ON / 254 |
+| `GET /lights/living1` | 影響なし(OFF / 254 のまま) |
+
+### 判明した事項
+
+- `philips_hue_factory_reset` は 1 回で効かないことがある。ブロードキャストが電球に届かなかったと思われる(電球は階段、ドングルはリビング)。参加イベントが 2 分以内に出なければ、permit join を開いたまま同じ要求を再送すればよい
+- 13 章と同様、permit join だけでは参加しない。factory reset の送信が必須
